@@ -1,0 +1,16 @@
+#cloud-config
+
+packages:
+  - ca-certificates
+  - curl
+  - coreutils
+  - tar
+  - gzip
+  - gnupg
+
+runcmd:
+  - curl -fsSL https://packagecloud.io/install/repositories/circleci/runner/script.deb.sh?any=true | bash
+  - apt-get install -y circleci-runner
+  - sed -i "s/<< AUTH_TOKEN >>/$RUNNER_AUTH_TOKEN/g" /etc/circleci-runner/circleci-runner-config.yaml
+  - systemctl enable circleci-runner
+  - sudo systemctl start circleci-runner

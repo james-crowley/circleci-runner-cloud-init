@@ -1,0 +1,19 @@
+#cloud-config
+
+users:
+  - name: circleci
+    gecos: circleci
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+
+packages:
+  - ca-certificates
+  - curl
+  - coreutils
+  - tar
+  - gzip
+  - gnupg
+
+runcmd:
+  - curl -fsSL "https://circleci-binary-releases.s3.amazonaws.com/circleci-runner/${RUNNERVERSION}/circleci-runner_linux_${CPUARCH}.tar.gz" -o /tmp/circleci-runner.tar.gz
+  - tar -zxvf /tmp/circleci-runner.tar.gz -C /usr/bin/ && rm /tmp/circleci-runner.tar.gz && chown circleci: /usr/bin/circleci-runner

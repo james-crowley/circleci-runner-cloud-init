@@ -10,7 +10,7 @@ packages:
 
 runcmd:
   - curl -fsSL https://packagecloud.io/install/repositories/circleci/runner/script.deb.sh?any=true | sudo bash
-  - sudo pt-get install -y circleci-runner
+  - sudo apt-get install -y circleci-runner
   - sudo sed -i "s/<< AUTH_TOKEN >>/$RUNNER_AUTH_TOKEN/g" /etc/circleci-runner/circleci-runner-config.yaml
   - sudo systemctl enable circleci-runner
   - sudo systemctl start circleci-runner

@@ -123,13 +123,6 @@ logging:
   file: $installDirPath\circleci-runner.log
 "@ -replace "([^`r])`n", "`$1`r`n" | Out-File runner-agent-config.yaml -Encoding ascii
 
-# Open runner-agent-config.yaml for edit
-Write-Host "Opening the config file for CircleCI Runner Agent in Notepad"
-Write-Host ""
-Write-Host "Please edit the file accordingly and close Notepad"
-(Start-Process notepad.exe -ArgumentList ("`"$installDirPath\runner-agent-config.yaml`"") -PassThru).WaitForExit()
-Write-Host ""
-
 # Start runner!
 Write-Host "Successfully configed CircleCI Runner Agent, please make sure to start the scheduled task!"
 Pop-Location

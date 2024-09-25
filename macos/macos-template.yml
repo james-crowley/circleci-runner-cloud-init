@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create a macOS EC2 instance with CircleCI runner agent installation via Cloud-init, with an option to create a Dedicated Host.
+
+Parameters:
+  EC2Name:
+    Type: String
+    Description: "Name of the EC2 Instance"
+
+  VpcID:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the VPC to be used
+
+  SubnetID:
+    Type: AWS::EC2::Subnet::Id
+    Description: ID of the Subnet to be used
+
+  EC2KeyPair:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+
+  InstanceType:
+    Description: EC2 instance type for macOS ARM-based systems
+    Type: String
+    Default: mac2.metal
+    AllowedValues:
+      - mac2.metal
+      - mac2-m1ultra.metal
+      - mac2-m2.metal
+      - mac2-m2pro.metal
+    ConstraintDescription: Must be a valid macOS ARM EC2 instance type.
+
+  MacOSVersion:
+    Description: "Choose the macOS version"
+    Type: String
+    Default: Sonoma
+    AllowedValues:
+      - Sonoma
+      - Ventura
+      - Monterey
+    ConstraintDescription: "Select either Sonoma, Ventura, or Monterey."
+
+  ResourceClassToken:
+    Description: CircleCI Runner Authentication Token (must be 80 alphanumeric characters)
+    Type: String
+    NoEcho: true
+    AllowedPattern: "^[a-zA-Z0-9]{80}$"
+    MinLength: 80
+    MaxLength: 80
+    ConstraintDescription: Token must be exactly 80 alphanumeric characters (letters and numbers only).
+
+  AvailabilityZone:
+    Description: "Choose an Availability Zone (must support macOS Dedicated Hosts)"
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: !Select [0, !GetAZs]  # Default to the first AZ
+    ConstraintDescription: Availability Zone must support macOS Dedicated Hosts.
+
+  DedicatedHostId:
+    Type: String
+    Description: "Optional: Existing Dedicated Host ID (leave blank to create a new one)"
+    Default: ""
+    AllowedPattern: "^$|^host-[a-z0-9]+$"
+    ConstraintDescription: Must be a valid Dedicated Host ID or empty to create a new one.
+
+Mappings:
+  MacOSVersionToAMI:
+    Sonoma:
+      AMI: ami-083104674423416b8
+    Ventura:
+      AMI: ami-0661aad36f513e48d
+    Monterey:
+      AMI: ami-0109be983051a8b1e
+
+Resources:
+  MacOSDedicatedHost:
+    Type: AWS::EC2::Host
+    Condition: CreateDedicatedHost
+    Properties:
+      AutoPlacement: off
+      AvailabilityZone: !Ref AvailabilityZone
+      InstanceType: !Ref InstanceType
+      HostRecovery: off  # You can change this if you want host recovery enabled for fault tolerance
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties: 
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref EC2KeyPair
+      SubnetId: !Ref SubnetID
+      ImageId: !FindInMap [MacOSVersionToAMI, !Ref MacOSVersion, AMI]  # Select the correct AMI based on macOS version
+      Placement:
+        AvailabilityZone: !Ref AvailabilityZone
+        HostId: !If [CreateDedicatedHost, !Ref MacOSDedicatedHost, !Ref DedicatedHostId]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+
+          # Set variables
+          RUNNER_AUTH_TOKEN="${ResourceClassToken}"  
+          USER_NAME="ec2-user" 
+          USER_HOME=$(eval echo "~$USER_NAME")  
+
+          TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+          INSTANCE_NAME=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+
+          sudo -u $USER_NAME -i <<EOF
+
+          brew install coreutils
+          brew tap circleci-public/circleci
+          brew install circleci-runner
+
+          EOF
+
+          sed -i '' "s/\[\[RUNNER_NAME\]\]/$INSTANCE_NAME/g; s/\[\[RESOURCE_CLASS_TOKEN\]\]/$RUNNER_AUTH_TOKEN/g" "$USER_HOME/Library/Preferences/com.circleci.runner/config.yaml"
+
+          spctl -a -vvv -t install "$(brew --prefix)/bin/circleci-runner"
+          sudo xattr -r -d com.apple.quarantine "$(brew --prefix)/bin/circleci-runner"
+
+          sudo mv "$USER_HOME/Library/LaunchAgents/com.circleci.runner.plist" "/Library/LaunchAgents/"
+
+          launchctl bootstrap user/$(id -u "$USER_NAME") /Library/LaunchAgents/com.circleci.runner.plist
+          launchctl enable user/$(id -u "$USER_NAME")/com.circleci.runner
+          launchctl kickstart -k user/$(id -u "$USER_NAME")/com.circleci.runner
+          launchctl print user/$(id -u "$USER_NAME")/com.circleci.runner
+
+          echo "CircleCI runner setup complete!"
+
+Conditions:
+  CreateDedicatedHost: !Equals [!Ref DedicatedHostId, ""]
+
+Outputs:
+  InstanceId:
+    Description: Instance ID of the created macOS EC2 instance
+    Value: !Ref EC2Instance
+
+  PublicIp:
+    Description: Public IP address of the macOS EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
+
+  Hostname:
+    Description: Hostname of the macOS EC2 instance
+    Value: !GetAtt EC2Instance.PrivateDnsName
+
+  DedicatedHostCreated:
+    Condition: CreateDedicatedHost
+    Description: ID of the newly created Dedicated Host (if applicable)
+    Value: !Ref MacOSDedicatedHost

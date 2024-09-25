@@ -1,0 +1,29 @@
+#cloud-config
+packages:
+  - ca-certificates
+  - curl
+  - coreutils
+  - tar
+  - gzip
+  - gnupg
+
+runcmd:
+  # Install CircleCI runner (choose RPM or DEB based on system)
+  - |
+    if [ -n "$(command -v yum)" ]; then
+      echo "RPM-based system detected (YUM)"
+      curl -fsSL https://packagecloud.io/install/repositories/circleci/runner/script.rpm.sh?any=true | sudo bash
+      sudo yum install circleci-runner -y
+    elif [ -n "$(command -v apt-get)" ]; then
+      echo "DEB-based system detected (APT)"
+      curl -fsSL https://packagecloud.io/install/repositories/circleci/runner/script.deb.sh?any=true | sudo bash
+      sudo apt-get install -y circleci-runner
+    else
+      echo "Unsupported operating system. Please refer to https://circleci.com/docs/install-machine-runner-3-on-linux/. Exiting."
+      exit 1
+    fi
+
+  # Configure CircleCI runner
+  - sudo sed -i "s/<< AUTH_TOKEN >>/REPLACE_WITH_TOKEN/g" /etc/circleci-runner/circleci-runner-config.yaml
+  - sudo systemctl enable circleci-runner
+  - sudo systemctl start circleci-runner

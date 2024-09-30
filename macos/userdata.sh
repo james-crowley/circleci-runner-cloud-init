@@ -22,8 +22,8 @@ EOF
 sed -i '' "s/\[\[RUNNER_NAME\]\]/$INSTANCE_NAME/g; s/\[\[RESOURCE_CLASS_TOKEN\]\]/$RUNNER_AUTH_TOKEN/g" "$USER_HOME/Library/Preferences/com.circleci.runner/config.yaml"
 
 # Remove the quarantine attribute to accept the notarization of the CircleCI runner
-spctl -a -vvv -t install "$(brew --prefix)/bin/circleci-runner"
-sudo xattr -r -d com.apple.quarantine "$(brew --prefix)/bin/circleci-runner"
+spctl -a -vvv -t install "/opt/homebrew/bin/circleci-runner"
+sudo xattr -r -d com.apple.quarantine "/opt/homebrew/bin/circleci-runner"
 
 # Move the CircleCI launch agent to the correct location
 sudo mv "$USER_HOME/Library/LaunchAgents/com.circleci.runner.plist" "/Library/LaunchAgents/"

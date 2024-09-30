@@ -51,15 +51,14 @@ Parameters:
   AvailabilityZone:
     Description: "Choose an Availability Zone (must support macOS Dedicated Hosts)"
     Type: AWS::EC2::AvailabilityZone::Name
-    Default: !Select [0, !GetAZs]  # Default to the first AZ
     ConstraintDescription: Availability Zone must support macOS Dedicated Hosts.
 
   DedicatedHostId:
     Type: String
     Description: "Optional: Existing Dedicated Host ID (leave blank to create a new one)"
     Default: ""
-    AllowedPattern: "^$|^host-[a-z0-9]+$"
-    ConstraintDescription: Must be a valid Dedicated Host ID or empty to create a new one.
+    AllowedPattern: "^$|^h-[a-z0-9]+$"
+    ConstraintDescription: Must be a valid Dedicated Host ID (starting with 'h-') or empty to create a new one.
 
 Mappings:
   MacOSVersionToAMI:
@@ -78,7 +77,6 @@ Resources:
       AutoPlacement: off
       AvailabilityZone: !Ref AvailabilityZone
       InstanceType: !Ref InstanceType
-      HostRecovery: off  # You can change this if you want host recovery enabled for fault tolerance
 
   EC2Instance:
     Type: AWS::EC2::Instance
@@ -86,22 +84,27 @@ Resources:
       InstanceType: !Ref InstanceType
       KeyName: !Ref EC2KeyPair
       SubnetId: !Ref SubnetID
-      ImageId: !FindInMap [MacOSVersionToAMI, !Ref MacOSVersion, AMI]  # Select the correct AMI based on macOS version
-      Placement:
-        AvailabilityZone: !Ref AvailabilityZone
-        HostId: !If [CreateDedicatedHost, !Ref MacOSDedicatedHost, !Ref DedicatedHostId]
+      ImageId: !FindInMap [MacOSVersionToAMI, !Ref MacOSVersion, AMI]
+      AvailabilityZone: !Ref AvailabilityZone
+      Affinity: "host"
+      Tenancy: "host"
+      HostId: !If [CreateDedicatedHost, !Ref MacOSDedicatedHost, !Ref DedicatedHostId]
+      SecurityGroupIds: 
+        - !Ref EC2SecurityGroup
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
 
           # Set variables
-          RUNNER_AUTH_TOKEN="${ResourceClassToken}"  
-          USER_NAME="ec2-user" 
-          USER_HOME=$(eval echo "~$USER_NAME")  
+          RUNNER_AUTH_TOKEN="${ResourceClassToken}"  # Replace this with your actual auth token
+          USER_NAME="ec2-user"  # Replace this with your actual user
+          USER_HOME=$(eval echo "~$USER_NAME")  # Dynamically fetch the home directory of the specified user
 
+          # Fetch the AWS instance ID securely using a generated token
           TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
           INSTANCE_NAME=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
 
+          # Run Homebrew commands as the specified user
           sudo -u $USER_NAME -i <<EOF
 
           brew install coreutils
@@ -110,19 +113,45 @@ Resources:
 
           EOF
 
+          # Update config file with actual instance name and runner auth token
           sed -i '' "s/\[\[RUNNER_NAME\]\]/$INSTANCE_NAME/g; s/\[\[RESOURCE_CLASS_TOKEN\]\]/$RUNNER_AUTH_TOKEN/g" "$USER_HOME/Library/Preferences/com.circleci.runner/config.yaml"
 
-          spctl -a -vvv -t install "$(brew --prefix)/bin/circleci-runner"
-          sudo xattr -r -d com.apple.quarantine "$(brew --prefix)/bin/circleci-runner"
+          # Remove the quarantine attribute to accept the notarization of the CircleCI runner
+          spctl -a -vvv -t install "/opt/homebrew/bin/circleci-runner"
+          sudo xattr -r -d com.apple.quarantine "/opt/homebrew/bin/circleci-runner"
 
+          # Move the CircleCI launch agent to the correct location
           sudo mv "$USER_HOME/Library/LaunchAgents/com.circleci.runner.plist" "/Library/LaunchAgents/"
 
+          # Enable and start the CircleCI runner service using updated launchctl commands
           launchctl bootstrap user/$(id -u "$USER_NAME") /Library/LaunchAgents/com.circleci.runner.plist
           launchctl enable user/$(id -u "$USER_NAME")/com.circleci.runner
           launchctl kickstart -k user/$(id -u "$USER_NAME")/com.circleci.runner
-          launchctl print user/$(id -u "$USER_NAME")/com.circleci.runner
+          launchctl print user/$(id -u "$USER_NAME")/com.circleci.runner  # Verify that the service is running
 
           echo "CircleCI runner setup complete!"
+      Tags:
+        - Key: Name
+          Value: !Ref EC2Name
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      GroupName: !Ref EC2Name
+      VpcId: !Ref VpcID
+      SecurityGroupIngress:
+        - CidrIp: "0.0.0.0/0"
+          FromPort: 22
+          IpProtocol: "tcp"
+          ToPort: 22
+        - CidrIpv6: "::/0"
+          FromPort: 22
+          IpProtocol: "tcp"
+          ToPort: 22
+      SecurityGroupEgress: 
+        - CidrIp: "0.0.0.0/0"
+          IpProtocol: "-1"
 
 Conditions:
   CreateDedicatedHost: !Equals [!Ref DedicatedHostId, ""]

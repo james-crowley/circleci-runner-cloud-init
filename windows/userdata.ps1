@@ -35,22 +35,7 @@ Write-Host "Script downloaded successfully."
 
 # Execute the installation script
 Write-Host "Running the CircleCI installation script..."
-& $installScriptPath
-
-# Path to the configuration file
-$configFilePath = "$installDirPath\runner-agent-config.yaml"
-
-# Modify the configuration file with the runner name and auth token
-Write-Host "Updating the CircleCI configuration file with runner details..."
-(Get-Content $configFilePath) -replace '<<RUNNER_NAME>>', $runnerName -replace '<<AUTH_TOKEN>>', $runnerAuthToken | Set-Content $configFilePath
-Write-Host "Configuration file updated."
-
-# Start CircleCI Runner Agent session keeper task after modifying the config file
-$taskName = "CircleCI Runner Agent session keeper"
-
-Write-Host "Starting CircleCI Runner Agent session keeper task"
-Start-ScheduledTask -TaskName $taskName
-Write-Host "CircleCI Runner Agent session keeper task started successfully"
+& $installScriptPath -RunnerName "$runnerName" -RunnerToken "$runnerAuthToken"
 
 # Output status
 Write-Host "CircleCI Runner setup complete!"
